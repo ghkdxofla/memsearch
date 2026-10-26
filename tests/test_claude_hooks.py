@@ -257,6 +257,34 @@ def test_claude_hook_memsearch_disable_exits_before_writing_memory(tmp_path: Pat
     assert not (tmp_path / ".memsearch").exists()
 
 
+def test_claude_hook_commands_handle_plugin_root_with_spaces(tmp_path: Path) -> None:
+    # Claude Code can install plugins under a config dir such as
+    # "~/Library/Application Support/...", so the hook commands must quote the root.
+    plugin_root = tmp_path / "Application Support" / "claude-code"
+    shutil.copytree(Path("plugins/claude-code"), plugin_root)
+    hooks = json.loads((plugin_root / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+    commands = [hook["command"] for groups in hooks.values() for group in groups for hook in group["hooks"]]
+    env = {
+        **os.environ,
+        "CLAUDE_PLUGIN_ROOT": str(plugin_root),
+        "MEMSEARCH_DISABLE": "1",
+        "CLAUDE_PROJECT_DIR": str(tmp_path),
+        "MEMSEARCH_DIR": str(tmp_path / ".memsearch"),
+    }
+
+    assert len(commands) == 4
+    for command in commands:
+        result = subprocess.run(
+            ["sh", "-c", command],
+            input="{}",
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert result.returncode == 0, f"{command}: {result.stderr}"
+        assert result.stdout.strip() == "{}"
+
+
 def test_claude_session_start_does_not_create_journal(tmp_path: Path) -> None:
     script = Path("plugins/claude-code/hooks/session-start.sh")
     home = tmp_path / "home"
